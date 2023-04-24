@@ -1,5 +1,4 @@
-[![arXiv](https://img.shields.io/badge/arXiv-2103.00738-b31b1b.svg)](https://arxiv.org/abs/2103.00738)
-# FPS-Net
+
 Code for "FPS-Net: A convolutional fusion network for large-scale LiDAR point cloud segmentation", accepted by [ISPRS journal of Photogrammetry and Remote Sensing](https://www.sciencedirect.com/science/article/abs/pii/S092427162100112X)  
 By [Aoran Xiao](https://scholar.google.com/citations?user=yGKsEpAAAAAJ&hl=zh-EN), Xiaofei Yang, Shijian Lu, Dayan Guan, Jiaxing Huang  
 
