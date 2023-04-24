@@ -123,7 +123,17 @@ class Trainer():
       self.model = Segmentator(self.ARCH,
                                self.parser.get_n_classes(),
                                self.path)
-
+      self.model.load_state_dict(torch.load('/home/ubuntu/Project/!project_final/FPS-Net/train/tasks/semantic/trained_model_22_04.pt'))
+    print(self.model)
+    for param in self.model.backbone.inc_range.parameters():
+      param.requires_grad = False
+    for param in self.model.backbone.inc_zxy.parameters():
+      param.requires_grad = False
+    for param in self.model.backbone.inc_remission.parameters():
+      param.requires_grad = False
+    for param in self.model.backbone.merge.parameters():
+      param.requires_grad = False
+    # pdb.set_trace()
     # GPU?
     self.gpu = False
     self.multi_gpu = False
@@ -194,14 +204,14 @@ class Trainer():
     steps_per_epoch = self.parser.get_train_size()
     up_steps = int(self.ARCH["train"]["wup_epochs"] * steps_per_epoch)
     final_decay = self.ARCH["train"]["lr_decay"] ** (1/steps_per_epoch)
+    #pdb.set_trace()
 
-
-    # self.scheduler = warmupLR(optimizer=self.optimizer,
-    #                           lr=self.ARCH["train"]["lr"],
-    #                           warmup_steps=up_steps,
-    #                           momentum=self.ARCH["train"]["momentum"],
-    #                           decay=final_decay)
-    self.scheduler = None
+    self.scheduler = warmupLR(optimizer=self.optimizer,
+                               lr=self.ARCH["train"]["lr"],
+                               warmup_steps=up_steps,
+                               momentum=self.ARCH["train"]["momentum"],
+                               decay=final_decay)
+    #self.scheduler = None
 
   @staticmethod
   def get_mpl_colormap(cmap_name):
@@ -232,13 +242,15 @@ class Trainer():
   @staticmethod
   def save_to_log(logdir, logger, info, epoch, w_summary=False, model=None, img_summary=False, imgs=[]):
     # save scalars
-    for tag, value in info.items():
-      if 'iou_cls' in tag:
-        logger.multi_scalar_summary(tag, value, epoch)
-      else:
-        logger.scalar_summary(tag, value, epoch)
+    #for tag, value in info.items():
+     # if 'iou_cls' in tag:
+      #  logger.multi_scalar_summary(tag, value, epoch)
+      ## Commented out because of CUDA overflow - nischal - 22/04
+      # else:
+      #   logger.scalar_summary(tag, value, epoch)
 
     # save summaries of weights and biases
+    '''
     if w_summary and model:
       for tag, value in model.named_parameters():
         tag = tag.replace('.', '/')
@@ -246,6 +258,7 @@ class Trainer():
         if value.grad is not None:
           logger.histo_summary(
               tag + '/grad', value.grad.data.cpu().numpy(), epoch)
+    '''
 
     if img_summary and len(imgs) > 0:
       directory = os.path.join(logdir, "predictions")
@@ -277,6 +290,8 @@ class Trainer():
         self.info_iter[name] = g['lr']
 
       # train for 1 epoch
+
+      
       acc, iou, iou_cls, loss, loss_xent, loss_ls, update_mean = self.train_epoch(train_loader=self.parser.get_train_set(),
                                                                                   model=self.model,
                                                                                   criterion=self.criterion,
@@ -288,8 +303,9 @@ class Trainer():
                                                                                   color_fn=self.parser.to_color,
                                                                                   report=self.ARCH["train"]["report_batch"],
                                                                                   show_scans=self.ARCH["train"]["show_scans"])
-
+      #pdb.set_trace()
       # update info
+
       self.info_epoch["train_update"] = update_mean
       self.info_epoch["train_loss"] = loss
       self.info_epoch["train_loss_xent"] = loss_xent
@@ -372,26 +388,29 @@ class Trainer():
     end = time.time()
     for i, (in_vol, proj_mask, proj_labels, _, path_seq, path_name, _, _, _, _, _, _, _, _, _) in enumerate(train_loader):
       # measure data loading time
+      # pdb.set_trace()
+      torch.cuda.empty_cache() 
       data_time.update(time.time() - end)
       if not self.multi_gpu and self.gpu:
         in_vol = in_vol.cuda()
         proj_mask = proj_mask.cuda()
       if self.gpu:
         proj_labels = proj_labels.cuda(non_blocking=True).long()
-
+      # pdb.set_trace()
       # compute output
-      output = model(in_vol, proj_mask)
+      output, trans_fuse_out, FPS_fuse_out = model(in_vol, proj_mask)
 
-      loss_xentropy = criterion(torch.log(output.clamp(min=1e-8)), proj_labels)
+      hint_loss = F.mse_loss(trans_fuse_out, FPS_fuse_out)
+      loss_xentropy = criterion(torch.log(output.clamp(min=1e-8)), proj_labels.long())
       if self.multi_gpu:
           loss_xentropy = loss_xentropy.mean()
 
       if LS_criterion is None:
-        loss = loss_xentropy
+        loss = (loss_xentropy) * 1 # scaling down the loss value since hint_loss is added
       else:
         loss_ls = LS_criterion(output, proj_labels.long())
-        loss = loss_ls + loss_xentropy
-
+        loss = (loss_ls + loss_xentropy ) * 1 # scaling down the loss value since hint_loss is added
+      # pdb.set_trace()
       # compute gradient and do SGD step
       optimizer.zero_grad()
       if self.n_gpus > 1:
@@ -400,6 +419,7 @@ class Trainer():
       else:
         loss.backward()
       optimizer.step()
+
       # measure accuracy and record loss
       loss = loss.mean()
       with torch.no_grad():
@@ -408,7 +428,7 @@ class Trainer():
         evaluator.addBatch(argmax, proj_labels)
         accuracy = evaluator.getacc()
         jaccard, class_jaccard = evaluator.getIoU()
-
+      
       losses.update(loss.item(), in_vol.size(0))
       acc.update(accuracy.item(), in_vol.size(0))
       iou.update(jaccard.item(), in_vol.size(0))
@@ -459,9 +479,9 @@ class Trainer():
                   epoch, i, len(train_loader), batch_time=batch_time,
                   data_time=data_time, loss=losses, acc=acc, iou=iou, lr=lr,
                   umean=update_mean, ustd=update_std))
-
+      # pdb.set_trace()
       # step scheduler
-      # scheduler.step()
+      scheduler.step()
       # update info
       self.info_iter["train_update"] = update_mean
       self.info_iter["train_loss"] = float(loss)
@@ -475,8 +495,11 @@ class Trainer():
                           w_summary=self.ARCH["train"]["save_summary"],
                           model=self.model_single)
     iou_cls_avg = []
+    # pdb.set_trace()
     for cls in range(20):
         iou_cls_avg.append(iou_cls[cls].avg)
+    # pdb.set_trace()
+    torch.save(model.state_dict(), './trained_model_23_04.pt')
     return acc.avg, iou.avg, iou_cls_avg, losses.avg, losses_xentropy.avg, losses_ls.avg, update_ratio_meter.avg
 
   def validate(self, val_loader, model, criterion, evaluator, class_func, color_fn, save_scans, LS_criterion=None):
@@ -510,14 +533,15 @@ class Trainer():
           proj_labels = proj_labels.cuda(non_blocking=True).long()
 
         # compute output
-        output = model(in_vol, proj_mask)
+        output, trans_fuse_out, FPS_fuse_out = model(in_vol, proj_mask)
+        hint_loss = F.mse_loss(trans_fuse_out, FPS_fuse_out)
 
-        loss_xentropy = criterion(torch.log(output.clamp(min=1e-8)), proj_labels)
+        loss_xentropy = criterion(torch.log(output.clamp(min=1e-8)), proj_labels.long())
         if LS_criterion is None:
-            loss = loss_xentropy
+            loss = (loss_xentropy + hint_loss) * 0.7
         else:
             loss_ls = LS_criterion(output, proj_labels.long())
-            loss = loss_ls + loss_xentropy
+            loss = (loss_ls + loss_xentropy + hint_loss) * 0.7
 
         # measure accuracy and record loss
         argmax = output.argmax(dim=1)

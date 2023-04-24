@@ -40,7 +40,7 @@ class Segmentator(nn.Module):
       self.backbone.cuda()
     # pdb.set_trace()
     stub = torch.cat((stub, stub), 0)
-    _, stub_skips = self.backbone(stub)
+    _,_,_, stub_skips = self.backbone(stub)
 
     if log_dir is None:
       decoderModule = imp.load_source("decoderModule",
@@ -56,7 +56,7 @@ class Segmentator(nn.Module):
                                            stub_skips=stub_skips,
                                            OS=self.ARCH["backbone"]["OS"],
                                            feature_depth=self.backbone.get_last_depth())
-      print("Test Phase: deoder loaded from ", log_dir + '/decoder_' + self.ARCH["decoder"]["name"] + '.py')
+      print("Test Phase: decoder loaded from ", log_dir + '/decoder_' + self.ARCH["decoder"]["name"] + '.py')
 
     if  'deeplab' in self.ARCH["backbone"]["name"]:
       self.head = nn.Sequential()
@@ -109,12 +109,14 @@ class Segmentator(nn.Module):
       print("Param CRF ", weights_crf)
 
     # get weights
+    path='11'
     if path is not None:
       # try backbone
       try:
-        w_dict = torch.load(path + "/backbone" + path_append,
-                            map_location=lambda storage, loc: storage)
-        self.backbone.load_state_dict(w_dict, strict=True)
+        #w_dict = torch.load(path + "/backbone" + path_append,
+        #                    map_location=lambda storage, loc: storage)
+        w_dict= torch.load('/home/ubuntu/2020-5-05-10_37/backbone')
+        self.backbone.load_state_dict(w_dict, strict=False)
         print("Successfully loaded model backbone weights")
       except Exception as e:
         print()
@@ -125,8 +127,9 @@ class Segmentator(nn.Module):
 
       # try decoder
       try:
-        w_dict = torch.load(path + "/segmentation_decoder" + path_append,
-                            map_location=lambda storage, loc: storage)
+        #w_dict = torch.load(path + "/segmentation_decoder" + path_append,
+        #                    map_location=lambda storage, loc: storage)
+        w_dict=torch.load('/home/ubuntu/2020-5-05-10_37/segmentation_decoder')
         self.decoder.load_state_dict(w_dict, strict=True)
         print("Successfully loaded model decoder weights")
       except Exception as e:
@@ -137,8 +140,9 @@ class Segmentator(nn.Module):
 
       # try head
       try:
-        w_dict = torch.load(path + "/segmentation_head" + path_append,
-                            map_location=lambda storage, loc: storage)
+        #w_dict = torch.load(path + "/segmentation_head" + path_append,
+        #                    map_location=lambda storage, loc: storage)
+        w_dict=torch.load('/home/ubuntu/2020-5-05-10_37/segmentation_head')
         self.head.load_state_dict(w_dict, strict=True)
         print("Successfully loaded model head weights")
       except Exception as e:
@@ -150,8 +154,9 @@ class Segmentator(nn.Module):
       # try CRF
       if self.CRF:
         try:
-          w_dict = torch.load(path + "/segmentation_CRF" + path_append,
-                              map_location=lambda storage, loc: storage)
+          #w_dict = torch.load(path + "/segmentation_CRF" + path_append,
+          #                    map_location=lambda storage, loc: storage)
+          w_dict=torch.load('/home/ubuntu/2020-5-05-10_37/backbone')
           self.CRF.load_state_dict(w_dict, strict=True)
           print("Successfully loaded model CRF weights")
         except Exception as e:
@@ -163,18 +168,21 @@ class Segmentator(nn.Module):
       print("No path to pretrained, using random init.")
 
   def forward(self, x, mask=None):
-    y, skips = self.backbone(x)
-    y = self.decoder(y, skips)
-    y = self.head(y)
-
-    y = F.softmax(y, dim=1)
+    #pdb.set_trace()
+    # y1_ is the output from transformer fusion after it passes through encoder
+    # y1 is output from transformer fusion
+    # y2 is output of the fpsnet fusion module
+    y1_, y1, y2, skips = self.backbone(x)
+    y1_ = self.decoder(y1_, skips)
+    y1_ = self.head(y1_)
+    y1_ = F.softmax(y1_, dim=1)
 
     if self.CRF:
       assert(mask is not None)
-      y = self.CRF(x, y, mask)
+      y1_ = self.CRF(x, y1_, mask)
 
-    assert y.shape[0] == 1
-    return y[0]
+    # assert y.shape[0] == 1
+    return y1_, y1, y2 #y1_ is the final output
 
   def save_checkpoint(self, logdir, suffix=""):
     # Save the weights

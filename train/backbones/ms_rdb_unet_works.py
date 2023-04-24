@@ -6,8 +6,6 @@ from common.context_block import ContextBlock
 
 import pdb
 
-from backbones.transformer_fusion import *
-
 class RDBlock(nn.Module):
   def __init__(self, inplanes, outplanes, block_index, layer_num=2, bn_d=0.1):
     super(RDBlock, self).__init__()
@@ -174,35 +172,28 @@ class Backbone(nn.Module):
 
         # last channels
         self.last_channels = dim * 16
-        self.trans_fusion = trans_fuse()
 
-    def forward(self, x): # x --> ([2, 5, 64, 2048])
-        # out1 is output from transformer fusion
-        out1 = self.trans_fusion(x)
+    def forward(self, x):
+        range = x[:,0,:,:].unsqueeze(1)
+        zxy = x[:,1:4,:,:]
+        remission = x[:,-1,:,:].unsqueeze(1)
 
-        range = x[:,0,:,:].unsqueeze(1) #([2, 1, 64, 2048])
-        zxy = x[:,1:4,:,:] #([2, 3, 64, 2048])
-        remission = x[:,-1,:,:].unsqueeze(1) #([2, 1, 64, 2048])
-        range = self.inc_range(range) #([2, 32, 64, 2048])
-        zxy = self.inc_zxy(zxy) #([2, 32, 64, 2048])
-        remission = self.inc_remission(remission) #([2, 32, 64, 2048])
-        # FPS fusion has ReLU activation. Transformer fusion should also have a similar activation to use hinting? But we have self.merge which has leaky ReLU activation
-        x = torch.cat((range, zxy, remission), dim=1) #([2, 96, 64, 2048])
-        #out2 is the output of the fpsnet fusion module
-        out2 = self.merge(x) #([2, 32, 64, 2048])
-        # pdb.set_trace()
-        out1_, x1 = self.down1(out1)
-        out1_, x2 = self.down2(out1_)
-        out1_, x3 = self.down3(out1_)
-        out1_, x4 = self.down4(out1_)
-        out1_ = self.mid(out1_)
-        #out1_ is the output from transformer fusion after it passes through encoder
-        
+        range = self.inc_range(range)
+        zxy = self.inc_zxy(zxy)
+        remission = self.inc_remission(remission)
+        x = torch.cat((range, zxy, remission), dim=1)
+        x = self.merge(x)
+
+        x, x1 = self.down1(x)
+        x, x2 = self.down2(x)
+        x, x3 = self.down3(x)
+        x, x4 = self.down4(x)
+        x = self.mid(x)
         # x = self.gc_att(x)
-        # self.range = range
-        # self.zxy=zxy
-        # self.remission=remission
-        return out1_,out1, out2, [x4, x3, x2, x1]
+        self.range = range
+        self.zxy=zxy
+        self.remission=remission
+        return x, [x4, x3, x2, x1]
 
     def get_last_depth(self):
         return self.last_channels
