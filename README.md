@@ -1,5 +1,5 @@
 
-Code for "VLR Project by Avi and Nischal",
+Code for Pointcloud segmentation Project by Avi and Nischal inspired by FPSNet https://github.com/xiaoaoran/FPS-Net
 
 
 ## Install
